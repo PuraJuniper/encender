@@ -44,7 +44,7 @@ export async function applyPlan(planDefinition, patientReference=null, resolver=
     id: getId(),
     subject: {
       reference: 'Patient/' + Patient.id,
-      display: Patient?.name?.given + ' ' + Patient?.name?.family
+      display: Patient?.name[0]?.given[0] + ' ' + Patient?.name[0]?.family
     },
     instantiatesCanonical: planDefinition.url,
     intent: 'proposal',
@@ -441,7 +441,7 @@ function formatErrorMessage(errorOutput) {
     id: getId(),
     subject: {
       reference: 'Patient/' + Patient.id,
-      display: (Patient?.name?.given + ' ' + Patient?.name?.family).trim()
+      display: Patient?.name[0]?.given[0] + ' ' + Patient?.name[0]?.family
     }
   };
   
