@@ -4,7 +4,7 @@ const validator = new JSONSchemaValidator();
 
 import { Worker } from 'worker_threads';
 import { initialzieCqlWorker } from 'cql-worker';
-import { getIncrementalId, pruneNull, elmJsonId } from './utils.js';
+import { getIncrementalId, pruneNull, parseName, expandPathAndValue, shouldTryToStringify, transformChoicePaths } from './utils.js';
 
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
@@ -44,7 +44,7 @@ export async function applyPlan(planDefinition, patientReference=null, resolver=
     id: getId(),
     subject: {
       reference: 'Patient/' + Patient.id,
-      display: Patient?.name[0]?.given[0] + ' ' + Patient?.name[0]?.family
+      display: parseName(Patient?.name)
     },
     instantiatesCanonical: planDefinition.url,
     intent: 'proposal',
@@ -192,7 +192,7 @@ function applyGuard(appliableResource, patientReference=null, resolver=null, aux
 
   // Try to resolve the patient reference
   let Patient = resolver(patientReference);
-  if (!Patient || Patient?.length == 0) throw new Error('Patient reference cannot be resolved');
+  if (!Patient || Patient?.length == 0 || !Patient[0]) throw new Error('Patient reference cannot be resolved');
   Patient = Patient[0];
 
   return Patient;
@@ -320,8 +320,13 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
           if (act?.dynamicValue) {
             // Copy the values over to the target resource
             CarePlan = evaluatedValues.reduce((acc, cv) => {
-              acc[cv.path] = cv.evaluated;
-              return acc;
+              let path = transformChoicePaths('CarePlan', cv.path);
+              let value = shouldTryToStringify(cv.path, cv.evaluated) ? JSON.stringify(cv.evaluated) : cv.evaluated;
+              let append = expandPathAndValue(path, value);
+              return {
+                ...acc,
+                ...append
+              };
             }, CarePlan);
           }
 
@@ -353,8 +358,13 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
           if (act?.dynamicValue) {
             // Copy the values over to the target resource
             targetResource = evaluatedValues.reduce((acc, cv) => {
-              acc[cv.path] = cv.evaluated;
-              return acc;
+              let path = transformChoicePaths(targetResource.resourceType, cv.path);
+              let value = shouldTryToStringify(cv.path, cv.evaluated) ? JSON.stringify(cv.evaluated) : cv.evaluated;
+              let append = expandPathAndValue(path, value);
+              return {
+                ...acc,
+                ...append
+              };
             }, targetResource);
           }
 
@@ -441,7 +451,7 @@ function formatErrorMessage(errorOutput) {
     id: getId(),
     subject: {
       reference: 'Patient/' + Patient.id,
-      display: Patient?.name[0]?.given[0] + ' ' + Patient?.name[0]?.family
+      display: parseName(Patient?.name)
     }
   };
   
@@ -564,8 +574,13 @@ function formatErrorMessage(errorOutput) {
 
       // Copy the values over to the target resource
       targetResource = evaluatedValues.reduce((acc, cv) => {
-        acc[cv.path] = cv.evaluated;
-        return acc;
+        let path = transformChoicePaths(targetResource.resourceType, cv.path);
+        let value = shouldTryToStringify(cv.path, cv.evaluated) ? JSON.stringify(cv.evaluated) : cv.evaluated;
+        let append = expandPathAndValue(path, value);
+        return {
+          ...acc,
+          ...append
+        };
       }, targetResource);
     } finally {
       cqlWorker?.terminate();
