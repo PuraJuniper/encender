@@ -259,11 +259,12 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
     if (act?.condition) {
       // TODO: Check that these are applicability conditions
       const evaluatedConditions = await Promise.all(act.condition.map(async (c) => {
-        if (c?.expression?.language != 'text/cql') {
+        if (c?.expression?.language != 'text/cql' && c?.expression?.language != 'text/cql.identifier') {
           throw new Error('Action condition specifies an unsupported expression language');
         }
         const expression = c.expression.expression;
         const value = await evaluateExpression(expression);
+        console.log(`Evaluated expression ${expression} returned:`, value)
         return value;
         // TODO: Throw error if expression can't be evaluated (two cases)
       }));
