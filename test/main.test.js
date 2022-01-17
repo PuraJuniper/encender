@@ -129,7 +129,9 @@ describe('More Complex Conversion Tests', async function() {
     RequestGroup.action.should.deep.equal([
       {
         id: '5',
-        resource: 'CarePlan/6'
+        resource: {
+          reference: 'CarePlan/6'
+        }
       }
     ]);
 
@@ -174,7 +176,9 @@ describe('More Complex Conversion Tests', async function() {
         action: [
           {
             id: '11',
-            resource: 'CarePlan/12'
+            resource: {
+              reference: 'CarePlan/12'
+            }
           }
         ]
       }
@@ -214,7 +218,9 @@ describe('More Complex Conversion Tests', async function() {
     RequestGroup.action.should.deep.equal([
       {
         id: '17',
-        resource: 'ServiceRequest/18'
+        resource: {
+          reference: 'ServiceRequest/18'
+        }
       }
     ]);
 
@@ -320,7 +326,9 @@ describe('CQL expression tests', async function() {
         action: [
           {
             id: '27',
-            resource: 'CarePlan/28'
+            resource: {
+              reference: 'CarePlan/28'
+            }
           }
         ]
       }
@@ -380,7 +388,9 @@ describe('CQL expression tests', async function() {
         action: [
           {
             id: '42',
-            resource: 'CarePlan/43'
+            resource: {
+              reference: 'CarePlan/43'
+            }
           }
         ]
       }
@@ -422,7 +432,9 @@ describe('CQL expression tests', async function() {
         action: [
           {
             id: '53',
-            resource: 'ServiceRequest/54'
+            resource: {
+              reference: 'ServiceRequest/54'
+            }
           }
         ]
       }
@@ -465,7 +477,9 @@ describe('CQL expression tests', async function() {
         action: [
           {
             id: '59',
-            resource: 'CommunicationRequest/60'
+            resource: {
+              reference: 'CommunicationRequest/60'
+            }
           }
         ]
       }

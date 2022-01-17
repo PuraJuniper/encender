@@ -2,13 +2,21 @@ const fhir_json_schema_validator = await import('@asymmetrik/fhir-json-schema-va
 const JSONSchemaValidator = fhir_json_schema_validator.default;
 const validator = new JSONSchemaValidator();
 
-// import { Worker } from 'worker_threads';
+let inNode = false;
+if (typeof window === 'undefined') {
+  // Running in Node
+  inNode = true;
+  var Worker = (await import('worker_threads')).Worker;
+  var createRequire = (await import('module')).createRequire;
+  var require = createRequire(import.meta.url);
+}
+else {
+  var Worker = window.Worker;
+}
 import { initialzieCqlWorker } from 'cql-worker';
 import { getIncrementalId, pruneNull, parseName, expandPathAndValue, shouldTryToStringify, transformChoicePaths } from './utils.js';
 
-// import { createRequire } from 'module';
-// const require = createRequire(import.meta.url);
-const workerUrl = './cql.worker.js';
+const workerUrl = inNode ? require.resolve('cql-worker/src/cql-worker-thread.js') : './cql.worker.js';
 
 // export { simpleResolver } from './simpleResolver.js';
 
@@ -87,7 +95,7 @@ export async function applyPlan(planDefinition, patientReference=null, resolver=
   let cqlWorker = new Worker(workerUrl);
   try {
 
-    let [setupExecution, sendPatientBundle, evaluateExpression] = initialzieCqlWorker(cqlWorker, false);
+    let [setupExecution, sendPatientBundle, evaluateExpression] = initialzieCqlWorker(cqlWorker, inNode);
 
     // Before processing each action, we need to check whether a library is being 
     // referenced by this PlanDefinition.
@@ -110,7 +118,12 @@ export async function applyPlan(planDefinition, patientReference=null, resolver=
           // NOTE: The cql-worker library can only execute ELM JSON
           for (const libraryContent of library.content) {
             if (libraryContent.contentType == "application/elm+json") {
-              elmJson = JSON.parse(window.atob(libraryContent.data)); // TODO: Throw error on no data
+              if (inNode) {
+                elmJson = JSON.parse(Buffer.from(libraryContent.data,'base64').toString('ascii'));
+              }
+              else {
+                elmJson = JSON.parse(window.atob(libraryContent.data)); // TODO: Throw error on no data
+              }
               break;
             }
           }
@@ -527,7 +540,7 @@ function formatErrorMessage(errorOutput) {
     // Define a new worker thread to evaluate these dynamicValue expressions
     let cqlWorker = new Worker(workerUrl);
     try {
-      let [setupExecution, sendPatientBundle, evaluateExpression] = initialzieCqlWorker(cqlWorker, false);
+      let [setupExecution, sendPatientBundle, evaluateExpression] = initialzieCqlWorker(cqlWorker, inNode);
       if (Array.isArray(activityDefinition.library)) {
         const libRef = activityDefinition.library[0];
   
@@ -543,7 +556,12 @@ function formatErrorMessage(errorOutput) {
           const resolvedLibraries = resolver(libRef);
           if (Array.isArray(resolvedLibraries) && resolvedLibraries.length > 0) {
             const library = resolvedLibraries[0]; // TODO: What to do if multiple libraries are found?
-            elmJson = JSON.parse(window.atob(library.content[0].data)); // TODO: Throw error on no data
+            if (inNode) {
+              elmJson = JSON.parse(Buffer.from(library.content[0].data,'base64').toString('ascii'));
+            }
+            else {
+              elmJson = JSON.parse(window.atob(library.content[0].data)); // TODO: Throw error on no data
+            }
           } else {
             throw new Error('Cannot resolve referenced Library: ' + libRef);
           }
