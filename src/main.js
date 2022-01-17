@@ -305,9 +305,9 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
           let [CarePlan, RequestGroup, ...moreResources] = await applyPlan(planDefinition, patientReference, resolver, aux);
 
           // Link the generated CarePlan's id via the resource element
-          applied.resource = 'CarePlan/' + CarePlan.id;
+          applied.resource = { reference: 'CarePlan/' + CarePlan.id };
 
-          // Set the status of the target resource to option
+          // Set the status of the target CarePlan to option
           CarePlan.status = 'option';
           
           // Apply any overrides based on the elements of the action such as title, description, and dynamicValue.
@@ -342,8 +342,8 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
           const activityDefinition = resolver(def)[0];
           let targetResource = await applyActivity(activityDefinition, patientReference, resolver, aux);
 
-          // Link the generated CarePlan's id via the resource element
-          applied.resource = targetResource.resourceType + '/' + targetResource.id;
+          // Link the generated resource's id via the resource element
+          applied.resource = { reference: targetResource.resourceType + '/' + targetResource.id };
 
           // Set the status of the target resource to option
           targetResource.status = 'option';
