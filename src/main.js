@@ -99,8 +99,8 @@ export async function applyPlan(planDefinition, patientReference=null, resolver=
 
     // Before processing each action, we need to check whether a library is being 
     // referenced by this PlanDefinition.
-    if (Array.isArray(planDefinition.library)) {
-      const libRef = planDefinition.library[0];
+    if (Array.isArray(planDefinition.library) || typeof(planDefinition.library) === 'string') {
+      const libRef = Array.isArray(planDefinition.library) ? planDefinition.library[0] : planDefinition.library;
 
       // Check aux for objects necessary for CQL execution
       let elmJsonDependencies = aux.elmJsonDependencies ?? [];
