@@ -387,7 +387,7 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
 
         } else if (/Questionnaire/.test(def)) {
           // TODO: Process Questionnaires
-
+          applied.resource = { reference: def };
         }
 
       } else if (act?.action) {
