@@ -16,7 +16,7 @@ else {
 import { initialzieCqlWorker } from 'cql-worker';
 import { getIncrementalId, pruneNull, parseName, expandPathAndValue, shouldTryToStringify, transformChoicePaths } from './utils.js';
 
-const workerUrl = inNode ? require.resolve('cql-worker/src/cql-worker-thread.js') : './cql.worker.js';
+const workerUrl = inNode ? require.resolve('cql-worker/src/cql-worker-thread.js') : new URL('/node_modules/cql-worker/src/cql.worker.js', import.meta.url);
 
 // export { simpleResolver } from './simpleResolver.js';
 
