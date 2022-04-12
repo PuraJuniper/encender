@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@asymmetrik/fhir-json-schema-validator": "^0.9.8",
-    "cql-worker": "git@github.com:PuraJuniper/cql-worker.git#c1d3a221d49ec8ee0485a066a165d712046993b4",
+    "cql-worker": "git@github.com:PuraJuniper/cql-worker.git#01896cf26191ead0fc6617a6618c1c8a6993827e",
     "semver": "^6.3.0"
   }
 }
