@@ -14,7 +14,7 @@ else {
   var Worker = window.Worker;
 }
 import { initialzieCqlWorker } from 'cql-worker';
-import { getIncrementalId, pruneNull, parseName, expandPathAndValue, shouldTryToStringify, transformChoicePaths } from './utils.js';
+import { getIncrementalId, pruneNull, parseName, expandPathAndValue, shouldTryToStringify, transformChoicePaths, getElmJsonFromLibrary, writeValueToPath } from './utils.js';
 
 const workerUrl = inNode ? require.resolve('cql-worker/src/cql-worker-thread.js') : './cql.worker.js';
 
@@ -116,17 +116,7 @@ export async function applyPlan(planDefinition, patientReference=null, resolver=
           const library = resolvedLibraries[0]; // TODO: What to do if multiple libraries are found?
           // Find an ELM JSON Attachment
           // NOTE: The cql-worker library can only execute ELM JSON
-          for (const libraryContent of library.content) {
-            if (libraryContent.contentType == "application/elm+json") {
-              if (inNode) {
-                elmJson = JSON.parse(Buffer.from(libraryContent.data,'base64').toString('ascii'));
-              }
-              else {
-                elmJson = JSON.parse(window.atob(libraryContent.data)); // TODO: Throw error on no data
-              }
-              break;
-            }
-          }
+          elmJson = getElmJsonFromLibrary(library, inNode);
           if (!elmJson) {
             throw new Error('No Attachments with contentType "application/elm+json" found in referenced Library: ' + libRef);
           }
@@ -338,10 +328,8 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
               let path = transformChoicePaths('RequestGroup', cv.path);
               let value = shouldTryToStringify(cv.path, cv.evaluated) ? JSON.stringify(cv.evaluated) : cv.evaluated;
               let append = expandPathAndValue(path, value);
-              return {
-                ...acc,
-                ...append
-              };
+              // Write `value` to the specified path
+              return writeValueToPath(acc, path, value);
             }, RequestGroup);
           }
 
@@ -375,10 +363,8 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
               let path = transformChoicePaths(targetResource.resourceType, cv.path);
               let value = shouldTryToStringify(cv.path, cv.evaluated) ? JSON.stringify(cv.evaluated) : cv.evaluated;
               let append = expandPathAndValue(path, value);
-              return {
-                ...acc,
-                ...append
-              };
+              // Write `value` to the specified path
+              return writeValueToPath(acc, path, value);
             }, targetResource);
           }
 
@@ -555,11 +541,11 @@ function formatErrorMessage(errorOutput) {
           const resolvedLibraries = await resolver(libRef);
           if (Array.isArray(resolvedLibraries) && resolvedLibraries.length > 0) {
             const library = resolvedLibraries[0]; // TODO: What to do if multiple libraries are found?
-            if (inNode) {
-              elmJson = JSON.parse(Buffer.from(library.content[0].data,'base64').toString('ascii'));
-            }
-            else {
-              elmJson = JSON.parse(window.atob(library.content[0].data)); // TODO: Throw error on no data
+            // Find an ELM JSON Attachment
+            // NOTE: The cql-worker library can only execute ELM JSON
+            elmJson = getElmJsonFromLibrary(library, inNode);
+            if (!elmJson) {
+              throw new Error('No Attachments with contentType "application/elm+json" found in referenced Library: ' + libRef);
             }
           } else {
             throw new Error('Cannot resolve referenced Library: ' + libRef);
@@ -596,10 +582,8 @@ function formatErrorMessage(errorOutput) {
         let path = transformChoicePaths(targetResource.resourceType, cv.path);
         let value = shouldTryToStringify(cv.path, cv.evaluated) ? JSON.stringify(cv.evaluated) : cv.evaluated;
         let append = expandPathAndValue(path, value);
-        return {
-          ...acc,
-          ...append
-        };
+        // Write `value` to the specified path
+        return writeValueToPath(acc, path, value);
       }, targetResource);
     } finally {
       cqlWorker?.terminate();
