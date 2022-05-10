@@ -31,6 +31,7 @@ export function pruneNull (obj)
       return acc
     }, {})
   }
+
   return obj
 }
 
@@ -57,6 +58,7 @@ export function parseName (names)
       return acc
     }, name)
   } // TODO: Else throw error
+
   return name.trim()
 }
 
