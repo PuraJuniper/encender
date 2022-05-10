@@ -3,8 +3,9 @@
 function * simpleGenerator ()
 {
   let n = 1
-  while (true)
+  while (true) {
     yield n++
+  }
 }
 
 let simpleCounter = simpleGenerator()
@@ -22,7 +23,11 @@ export function pruneNull (obj)
   } else if (typeof obj === 'object') {
     return Object.keys(obj).reduce((acc, key) => {
       const val = pruneNull(obj[key])
-      if (val != null) acc[key] = val
+
+      if (val !== null) {
+        acc[key] = val
+      }
+
       return acc
     }, {})
   }
@@ -36,13 +41,20 @@ export function parseName (names)
   if (Array.isArray(names)) {
     name = names.reduce((acc, cv) => {
       if (acc === '') {
-        if (cv.text) return cv.text
-        else if (cv.family) {
+        if (cv.text) {
+          return cv.text
+        } else if (cv.family) {
           if (cv.given && Array.isArray(cv.given)) {
             return cv.given.reduce((a, c) => a + ' ' + c, '') + ' ' + cv.family
-          } else return cv.family
-        } else return acc
-      } else return acc
+          }
+
+          return cv.family
+        }
+
+        return acc
+      }
+
+      return acc
     }, name)
   } // TODO: Else throw error
   return name.trim()
@@ -73,14 +85,10 @@ export function shouldTryToStringify (elementPath, elementValue)
   // [simple FHIRPath](https://www.hl7.org/fhir/fhirpath.html#simple) allowed in
   // path.
   if (elementPath) {
-    if (
-      /ofType\(string\)$/.test(elementPath) &&
-      typeof elementValue != 'string'
-    ) return true
-    else return false
-  } else {
-    return false
+    return /ofType\(string\)$/.test(elementPath) && typeof elementValue !== 'string'
   }
+
+  return false
 }
 
 /**
@@ -100,8 +108,12 @@ export function transformChoicePaths (resource, path)
   // E.g., a.b[0].c --> a.b.c.
   let pathSegments = path.split('.').reduce((acc, cv) => {
     let element = cv.split('[')[0]
-    if (/ofType\(string\)$/.test(element)) return acc
-    else return acc + '.' + element
+
+    if (/ofType\(string\)$/.test(element)) {
+      return acc
+    }
+
+    return acc + '.' + element
   }, '')
 
   // Remove the extraneous '.' at the end and append an '[x]'
@@ -116,18 +128,16 @@ export function transformChoicePaths (resource, path)
       // Check if this is a valid choice for this element
       if (publishedFhirChoiceTypes.elements[potentialChoiceType].includes(type)) {
         // Strip the trailing 'ofType()' from the path and append the type name
-        let updatedPath = path.split('.ofType')[0] + type[0].toUpperCase() + type.slice(1)
-        return updatedPath
-      } else {
-        // TODO: Throw error
+        return path.split('.ofType')[0] + type[0].toUpperCase() + type.slice(1)
       }
-    } else {
+
       // TODO: Throw error
     }
-  } else {
-    return path
+
+    // TODO: Throw error
   }
 
+  return path
 }
 
 /**
@@ -147,6 +157,7 @@ export function expandPathAndValue (path, value)
     if (/\[/.test(cv)) {
       let arrayParts = cv.split('[')
       let arrayName = arrayParts[0]
+
       return {
         open: acc.open + `{"${arrayName}":[`,
         close: ']}' + acc.close,
@@ -156,11 +167,11 @@ export function expandPathAndValue (path, value)
         open: acc.open,
         close: acc.close,
       }
-    } else {
-      return {
-        open: acc.open + `{"${cv}":`,
-        close: '}' + acc.close,
-      }
+    }
+
+    return {
+      open: acc.open + `{"${cv}":`,
+      close: '}' + acc.close,
     }
   }, {
     open: '',
@@ -173,8 +184,7 @@ export function expandPathAndValue (path, value)
     jsonStringComponents.close
 
   // Parse the JSON string.
-  let expandedObject = JSON.parse(jsonString)
-  return expandedObject
+  return JSON.parse(jsonString)
 }
 
 // From: https://www.hl7.org/fhir/choice-elements.json
