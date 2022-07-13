@@ -99,7 +99,12 @@ export async function applyPlan(planDefinition, patientReference=null, resolver=
   let cqlWorker = WorkerFactory();
   try {
 
-    let [setupExecution, sendPatientBundle, evaluateExpression] = initialzieCqlWorker(cqlWorker, isNodeJs);
+    let [setupExecution, sendPatientBundle, _evaluateExpression] = initialzieCqlWorker(cqlWorker, isNodeJs);
+    let evaluateExpression = async (expression, ...args) => {
+      const value = await _evaluateExpression(expression, ...args);
+      console.log(`Evaluated expression ${expression} returned:`, value);
+      return value;
+    }
 
     // Before processing each action, we need to check whether a library is being 
     // referenced by this PlanDefinition.
