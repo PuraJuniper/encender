@@ -392,8 +392,8 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
           otherResources.push(targetResource);
 
         } else if (/Questionnaire/.test(def)) {
-          // TODO: Process Questionnaires
-
+          // TODO: Process Questionnaires (further)
+          applied.resource = { reference: def };
         }
 
       } else if (act?.action) {
