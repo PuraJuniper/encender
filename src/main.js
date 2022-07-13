@@ -14,6 +14,8 @@ import {
 
 export { simpleResolver } from './simpleResolver.js';
 
+const acceptedCqlExpressionTypes = ['text/cql', 'text/cql.identifier', 'text/cql-identifier'];
+
 /**
  * Apply a PlanDefinition to a Patient
  * @param {Object} planDefinition - The PlanDefinition
@@ -267,7 +269,7 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
     if (act?.condition) {
       // TODO: Check that these are applicability conditions
       const evaluatedConditions = await Promise.all(act.condition.map(async (c) => {
-        if (c?.expression?.language != 'text/cql') {
+        if (!acceptedCqlExpressionTypes.includes(c?.expression?.language ?? "")) {
           throw new Error('Action condition specifies an unsupported expression language');
         }
         const expression = c.expression.expression;
@@ -293,7 +295,7 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
         if (act?.dynamicValue) {
           // Asynchronously evaluate all dynamicValues
           evaluatedValues = await Promise.all(act.dynamicValue.map(async (dV) => {
-            if (dV?.expression?.language != 'text/cql') {
+            if (!acceptedCqlExpressionTypes.includes(dV?.expression?.language ?? "")) {
               throw new Error('Dynamic value specifies an unsupported expression language');
             }
             const value = await evaluateExpression(dV.expression.expression);
@@ -587,7 +589,7 @@ function formatErrorMessage(errorOutput) {
 
       // Asynchronously evaluate all dynamicValues
       const evaluatedValues = await Promise.all(activityDefinition.dynamicValue.map(async (dV) => {
-        if (dV?.expression?.language != 'text/cql') {
+        if (!acceptedCqlExpressionTypes.includes(dV?.expression?.language ?? "")) {
           throw new Error('Dynamic value specifies an unsupported expression language');
         }
         const value = await evaluateExpression(dV.expression.expression);
