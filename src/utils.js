@@ -188,6 +188,63 @@ export function expandPathAndValue(path, value) {
   }
 }
 
+// Use at own risk
+// TODO: remake this using js proxies (likely much shorter too)
+export function writeValueToPath(original_obj, path, value) {
+  const path_parts = path.split('.');
+  const new_acc = {
+    ...original_obj
+  };
+  let write_to = new_acc;
+  for (let i = 0; i < path_parts.length; i++) {
+    const path_part = path_parts[i];
+    const arr_symbol_idx = path_part.indexOf('[');
+    if (arr_symbol_idx !== -1) {
+      let [part_stripped, arr_idx] = path_part.split('[');
+      arr_idx = arr_idx.slice(0, -1);
+      if (i === path_parts.length - 1) {
+        if (!(part_stripped in write_to) || !Array.isArray(write_to[part_stripped])) {
+          write_to[part_stripped] = [value];
+        }
+        else {
+          if (write_to[part_stripped].length > arr_idx) {
+            write_to[part_stripped] = value;
+          }
+          else {
+            // Wrong, but works for now
+            write_to[part_stripped].push(value);
+          }
+        }
+      }
+      else {
+        if (!(part_stripped in write_to) || !Array.isArray(write_to[part_stripped])) {
+          write_to[part_stripped] = [];
+        }
+        write_to = write_to[part_stripped]
+        if (write_to.length > arr_idx) {
+          write_to = write_to[arr_idx];
+        }
+        else {
+          // Wrong, but works for now
+          write_to = write_to[write_to.push({}) - 1];
+        }
+      }
+    }
+    else {
+      if (i === path_parts.length - 1) {
+        write_to[path_part] = value;
+      }
+      else {
+        if (!(path_part in write_to)) {
+          write_to[path_part] = {};
+        }
+        write_to = write_to[path_part]
+      }
+    }
+  }
+  return new_acc;
+}
+
 // From: https://www.hl7.org/fhir/choice-elements.json
 const publishedFhirChoiceTypes = {
   "elements" : {

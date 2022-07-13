@@ -6,7 +6,7 @@ import {
   getIncrementalId, 
   pruneNull, 
   parseName, 
-  expandPathAndValue, 
+  writeValueToPath, 
   shouldTryToStringify, 
   transformChoicePaths, 
   getElmJsonFromLibrary 
@@ -340,11 +340,7 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
             CarePlan = evaluatedValues.reduce((acc, cv) => {
               let path = transformChoicePaths('CarePlan', cv.path);
               let value = shouldTryToStringify(cv.path, cv.evaluated) ? JSON.stringify(cv.evaluated) : cv.evaluated;
-              let append = expandPathAndValue(path, value);
-              return {
-                ...acc,
-                ...append
-              };
+              return writeValueToPath(acc, path, value);
             }, CarePlan);
           }
 
@@ -380,11 +376,7 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
             targetResource = evaluatedValues.reduce((acc, cv) => {
               let path = transformChoicePaths(targetResource.resourceType, cv.path);
               let value = shouldTryToStringify(cv.path, cv.evaluated) ? JSON.stringify(cv.evaluated) : cv.evaluated;
-              let append = expandPathAndValue(path, value);
-              return {
-                ...acc,
-                ...append
-              };
+              return writeValueToPath(acc, path, value);
             }, targetResource);
           }
 
@@ -609,11 +601,7 @@ function formatErrorMessage(errorOutput) {
       targetResource = evaluatedValues.reduce((acc, cv) => {
         let path = transformChoicePaths(targetResource.resourceType, cv.path);
         let value = shouldTryToStringify(cv.path, cv.evaluated) ? JSON.stringify(cv.evaluated) : cv.evaluated;
-        let append = expandPathAndValue(path, value);
-        return {
-          ...acc,
-          ...append
-        };
+        return writeValueToPath(acc, path, value);
       }, targetResource);
     } finally {
       cqlWorker?.terminate();
