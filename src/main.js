@@ -503,16 +503,42 @@ function formatErrorMessage(errorOutput) {
   /*----------------------------------------------------------------------------
     3. Apply the structural elements of the ActivityDefinition to the target resource such as code, timing, doNotPerform, product, quantity, dosage, and so on
   ----------------------------------------------------------------------------*/
+  // Sofa: We're using the CPG IG, so the following mappings come from their
+  //  example activitydefinitions
   targetResource = pruneNull({
     ...targetResource,
-    code: activityDefinition?.code,
-    timing: activityDefinition?.timing,
+    meta: { profile: [activityDefinition?.profile] },
     doNotPerform: activityDefinition?.doNotPerform,
-    product: activityDefinition?.product,
-    quantity: activityDefinition?.quantity,
-    dosage: activityDefinition?.dosage
     // TODO: Copy over other structural elements as it makes sense
   });
+  
+  switch (activityDefinition?.kind) {
+    case "MedicationRequest":
+      targetResource = pruneNull({
+        ...targetResource,
+        intent: activityDefinition.intent,
+        priority: activityDefinition.priority,
+        medicationCodeableConcept: activityDefinition.productCodeableConcept,
+        instantiatesCanonical: activityDefinition.url ? [activityDefinition.url] : undefined,
+        dosageInstruction: activityDefinition.dosage,
+        // TODO: Copy over other structural elements as it makes sense
+
+        // Required by Cerner (https://fhir.cerner.com/millennium/r4/clinical/medications/medication-request/#create)
+        status: "active",
+        intent: ['plan', 'order'].includes(activityDefinition.intent) ? activityDefinition.intent : 'plan',
+        doNotPerform: activityDefinition.doNotPerform !== undefined ? false : undefined,
+        reportedBoolean: activityDefinition.reportedBoolean ?? true
+      });
+      break;
+    case "Observation":
+      targetResource = pruneNull({
+        ...targetResource,
+        // TODO: Copy over other structural elements as it makes sense
+      });
+      break;
+    default:
+      throw new Error(`Unable to convert ActivityDefinition to ${activityDefinition?.kind}`);
+  }
 
   /*----------------------------------------------------------------------------
     4. Resolve the participant element based on the user in context
