@@ -571,8 +571,8 @@ function formatErrorMessage(errorOutput) {
     let cqlWorker = WorkerFactory();
     try {
       let [setupExecution, sendPatientBundle, evaluateExpression] = initialzieCqlWorker(cqlWorker, isNodeJs);
-      if (Array.isArray(activityDefinition.library)) {
-        const libRef = activityDefinition.library[0];
+      if (Array.isArray(activityDefinition.library) || typeof(activityDefinition.library) === 'string') {
+        const libRef = Array.isArray(activityDefinition.library) ? activityDefinition.library[0] : activityDefinition.library;
   
         // Check aux for objects necessary for CQL execution
         let elmJsonDependencies = aux.elmJsonDependencies ?? [];
