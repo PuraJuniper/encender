@@ -331,7 +331,7 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
           applied = pruneNull({
             ...applied,
             title: act?.title ?? planDefinition?.title,
-            description: act?.description ?? planDefinition?.relatedArtifact,
+            description: act?.description,
             textEquivalent: act?.textEquivalent
           });
 
@@ -366,7 +366,7 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
           applied = pruneNull({
             ...applied,
             title: act?.title ?? activityDefinition?.title,
-            description: act?.description ?? activityDefinition?.relatedArtifact,
+            description: act?.description,
             textEquivalent: act?.textEquivalent
           });
 
@@ -522,12 +522,6 @@ function formatErrorMessage(errorOutput) {
         instantiatesCanonical: activityDefinition.url ? [activityDefinition.url] : undefined,
         dosageInstruction: activityDefinition.dosage,
         // TODO: Copy over other structural elements as it makes sense
-
-        // Required by Cerner (https://fhir.cerner.com/millennium/r4/clinical/medications/medication-request/#create)
-        status: "active",
-        intent: ['plan', 'order'].includes(activityDefinition.intent) ? activityDefinition.intent : 'plan',
-        doNotPerform: activityDefinition.doNotPerform !== undefined ? false : undefined,
-        reportedBoolean: activityDefinition.reportedBoolean ?? true
       });
       break;
     case "Observation":
