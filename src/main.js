@@ -102,7 +102,7 @@ export async function applyPlan(planDefinition, patientReference=null, resolver=
     let [setupExecution, sendPatientBundle, _evaluateExpression] = initialzieCqlWorker(cqlWorker, isNodeJs);
     let evaluateExpression = async (expression, ...args) => {
       const value = await _evaluateExpression(expression, ...args);
-      console.log(`Evaluated expression ${expression} returned:`, value);
+      addToLog(expression, value);
       return value;
     }
 
@@ -160,6 +160,19 @@ export async function applyPlan(planDefinition, patientReference=null, resolver=
     ...otherResources
   ];
 
+}
+
+var logLines = [];
+export function getLogLines() {
+  var logs = [...logLines]
+  logLines.splice(0)
+  return logs
+}
+
+function addToLog(expression, value) {
+  const logString = `Evaluated expression ${expression} returned: ${value}`;
+  logLines.push(logString)
+  console.log(logString);
 }
 
 /**
