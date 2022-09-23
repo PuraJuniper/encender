@@ -537,14 +537,42 @@ function formatErrorMessage(errorOutput) {
         // TODO: Copy over other structural elements as it makes sense
       });
       break;
-    case "Observation":
+    case "ServiceRequest": // https://hl7.org/fhir/uv/cpg/STU1/StructureDefinition-cpg-servicerequest-mappings.html
       targetResource = pruneNull({
         ...targetResource,
-        // TODO: Copy over other structural elements as it makes sense
+        identifier: activityDefinition.identifier,
+        instantiatesCanonical: activityDefinition.instantiatesCanonical,
+        instantiatesUri: activityDefinition.instantiatesUri,
+        basedOn: activityDefinition.basedOn,
+        replaces: activityDefinition.replaces,
+        requisition: activityDefinition.groupIdentifier,
+        status: activityDefinition.status,
+        intent: activityDefinition.intent,
+        priority: activityDefinition.priority,
+        doNotPerform: activityDefinition.doNotPerform,
+        code: activityDefinition.code,
+        subject: activityDefinition.subject,
+        encounter: activityDefinition.encounter,
+        occurrenceDateTime: activityDefinition.occurrenceDateTime,
+        occurrencePeriod: activityDefinition.occurrencePeriod,
+        occurrenceTiming: activityDefinition.occurrenceTiming,
+        authoredOn: activityDefinition.authoredOn,
+        requester: activityDefinition.requester,
+        performerType: activityDefinition.performerType,
+        performer: activityDefinition.performer,
+        reasonCode: activityDefinition.reasonCode,
+        reasonReference: activityDefinition.reasonReference,
+        insurance: activityDefinition.insurance,
+        supportingInfo: activityDefinition.supportingInfo,
+        note: activityDefinition.note,
+        relevantHistory: activityDefinition.relevantHistory,
       });
       break;
     default:
-      throw new Error(`Unable to convert ActivityDefinition to ${activityDefinition?.kind}`);
+      targetResource = pruneNull({
+        ...targetResource,
+      });
+      break;
   }
 
   /*----------------------------------------------------------------------------
