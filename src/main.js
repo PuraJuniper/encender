@@ -3,18 +3,35 @@ import { createRequire } from 'module';
 
 import { initialzieCqlWorker } from 'cql-worker';
 import { 
-  getIncrementalId, 
-  pruneNull, 
-  parseName, 
-  writeValueToPath, 
-  shouldTryToStringify, 
-  transformChoicePaths, 
+  getIncrementalId,
+  pruneNull,
+  parseName,
+  writeValueToPath,
   getElmJsonFromLibrary 
 } from './utils.js';
+
+import { validate } from './validate.js';
+import { merge } from './merge.js';
+
+import {
+  expandPathAndValue, 
+  shouldTryToStringify, 
+  transformChoicePaths
+} from './dynamic.js';
 
 export { simpleResolver } from './simpleResolver.js';
 
 const acceptedCqlExpressionTypes = ['text/cql', 'text/cql.identifier', 'text/cql-identifier'];
+
+export async function applyAndMerge(planDefinition, patientReference=null, resolver=null, aux={}) { 
+  let [CarePlan,RequestGroup,...otherResources] = await applyPlan(planDefinition, patientReference, resolver, aux);
+
+  RequestGroup = await merge(RequestGroup, otherResources);
+  return [
+    RequestGroup,
+    ...otherResources.filter(otr => otr?.resourceType && ['CarePlan','RequestGroup'].includes(otr.resourceType) === false)
+  ];
+}
 
 /**
  * Apply a PlanDefinition to a Patient
@@ -35,7 +52,7 @@ export async function applyPlan(planDefinition, patientReference=null, resolver=
   ----------------------------------------------------------------------------*/
 
   // Validates the input parameters and returns the Patient resource if there are no issues
-  const Patient = await applyGuard(planDefinition, patientReference, resolver, aux);
+  const Patient = await validate(planDefinition, patientReference, resolver, aux);
 
   // Either use the provided ID generation function or just use a simple counter.
   const getId = aux?.getId ?? getIncrementalId;
@@ -176,59 +193,6 @@ function addToLog(expression, value) {
 }
 
 /**
- * Validates the input parameters to both apply functions.
- * @param {Object} appliableResource - The FHIR Resource to be applied
- * @param {String} patientReference - A reference to the Patient
- * @param {Function} resolver - For resolving references to FHIR resources
- * @param {Object} aux - Auxiliary resources and services
- * @returns {Object[]} The resolved Patient resource
- */
-async function applyGuard(appliableResource, patientReference=null, resolver=null, aux={}) {
-
-  // Validate inputs
-  const appliableResourceTypes = [
-    'PlanDefinition',
-    'ActivityDefinition'
-  ];
-  if (appliableResourceTypes.includes(appliableResource?.resourceType) == false) {
-    let errMsg = 'One of the following resources must be provided';
-    appliableResourceTypes.forEach((rtp,ind) => {
-      if (ind==0) errMsg = errMsg + ': ' + rtp;
-      else errMsg = errMsg + ', ' + rtp;
-    });
-    throw new Error(errMsg);
-  } else if (!patientReference || typeof patientReference != 'string') {
-    throw new Error('A Patient reference string must be provided')
-  } else if (!resolver || typeof resolver != 'function') {
-    throw new Error('A resource resolver function must be provided')
-  } else if (aux?.validateIncoming) {
-    try {
-      // NOTE: Validation is a very costly operation to perform.
-      const fhir_json_schema_validator = await import('@asymmetrik/fhir-json-schema-validator');
-      const JSONSchemaValidator = fhir_json_schema_validator.default;
-      const validator = new JSONSchemaValidator();
-      let errors = validator.validate(appliableResource);
-      if (errors.length > 0) {
-        throw(errors);
-      }
-    } catch(err) {
-      const newErr = 'Input is not a valid FHIR resource\nErrors from FHIR JSON Schema Validator: ' + formatErrorMessage(err);
-      throw new Error(newErr);
-    }
-  } else if (('url' in appliableResource) == false) {
-    throw new Error('Incoming Definition does not have a canonical URL');
-  }
-
-  // Try to resolve the patient reference
-  let Patient = await resolver(patientReference);
-  if (!Patient || Patient?.length == 0 || !Patient[0]) throw new Error('Patient reference cannot be resolved');
-  Patient = Patient[0];
-
-  return Patient;
-
-}
-
-/**
  * Process the actions of a PlanDefinition
  * @param {Object[]} actions - An array of actions
  * @param {String} patientReference - A reference to the Patient
@@ -236,7 +200,7 @@ async function applyGuard(appliableResource, patientReference=null, resolver=nul
  * @param {Object} aux - Auxiliary resources and services
  * @returns {Object} Contains the applied actions as well as any generated resources
  */
-async function processActions(actions, patientReference, resolver, aux, evaluateExpression) {
+export async function processActions(actions, patientReference, resolver, aux, evaluateExpression) {
   /*----------------------------------------------------------------------------
     [Applying a PlanDefinition](https://www.hl7.org/fhir/plandefinition.html#12.18.3.3)
     Processing for each action proceeds according to the following steps:
@@ -277,7 +241,12 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
       id: act?.id ?? getId(),
       title: act?.title,
       description: act?.description,
-      textEquivalent: act?.textEquivalent
+      textEquivalent: act?.textEquivalent,
+      groupingBehavior: act?.groupingBehavior,
+      selectionBehavior: act?.selectionBehavior,
+      requiredBehavior: act?.requiredBehavior,
+      precheckBehavior: act?.precheckBehavior,
+      cardinalityBehavior: act?.cardinalityBehavior
       // TODO: Copy of over timing and any other elements that make sense
       // TODO: Carry over start and stop conditions
     });
@@ -396,8 +365,28 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
           otherResources.push(targetResource);
 
         } else if (/Questionnaire/.test(def)) {
-          // TODO: Process Questionnaires (further)
-          applied.resource = { reference: def };
+          // If this is an Questionnaire, resolve it so we can apply it
+          const questionnaire = ( await resolver(def) )[0];
+
+          // Link the Questionnaire's id via the resource element
+          applied.resource = {
+            reference: questionnaire.resourceType + '/' + questionnaire.id
+          };
+
+          // Apply any overrides based on the elements of the action such as title, description, and dynamicValue.
+          // NOTE: [PlanDefinition takes precedence over ActivityDefinition](https://www.hl7.org/fhir/plandefinition.html#12.18.3.4)
+          applied = pruneNull({
+            ...applied,
+            title: act?.title ?? questionnaire?.title,
+            description: act?.description ?? questionnaire?.description,
+            textEquivalent: act?.textEquivalent
+          });
+
+          // TODO: Consider what dynamicValue support would look like for a Questionnaire
+
+          // Bubble up the resources which were generated by this apply operation
+          otherResources.push(questionnaire);
+
         }
 
       } else if (act?.action) {
@@ -429,20 +418,6 @@ async function processActions(actions, patientReference, resolver, aux, evaluate
 }
 
 /**
- * Formats the errors output by the validator.validate() function
- * @param {String[]} errorOutput - The incoming error message array
- * @returns {String} - The formatted error message
- */
-function formatErrorMessage(errorOutput) {
-  let message = '\n\n';
-  for (let i = 0; i < errorOutput.length; i++) {
-    message += JSON.stringify(errorOutput[i], null, 4) + '\n';
-  }
-  message += '\n';
-  return message;
-}
-
-/**
  * Apply an ActivityDefinition to a Patient
  * @param {Object} planDefinition - The ActivityDefinition
  * @param {String} patientReference - A reference to the Patient
@@ -463,7 +438,7 @@ function formatErrorMessage(errorOutput) {
   ----------------------------------------------------------------------------*/
 
   // Validates the input parameters and returns the Patient resource if there are no issues
-  const Patient = await applyGuard(activityDefinition, patientReference, resolver, aux);
+  const Patient = await validate(activityDefinition, patientReference, resolver, aux);
 
   // Either use the provided ID generation function or just use a simple counter.
   const getId = aux?.getId ?? getIncrementalId;
@@ -516,11 +491,12 @@ function formatErrorMessage(errorOutput) {
   /*----------------------------------------------------------------------------
     3. Apply the structural elements of the ActivityDefinition to the target resource such as code, timing, doNotPerform, product, quantity, dosage, and so on
   ----------------------------------------------------------------------------*/
-  // Sofa: We're using the CPG IG, so the following mappings come from their
-  //  example activitydefinitions
   targetResource = pruneNull({
     ...targetResource,
     meta: { profile: [activityDefinition?.profile] },
+    basedOn: { reference: activityDefinition?.url },
+    code: activityDefinition?.code,
+    timing: activityDefinition?.timing,
     doNotPerform: activityDefinition?.doNotPerform,
     // TODO: Copy over other structural elements as it makes sense
   });
