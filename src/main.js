@@ -21,7 +21,7 @@ import {
 
 export { simpleResolver } from './simpleResolver.js';
 
-const acceptedCqlExpressionTypes = ['text/cql', 'text/cql.identifier', 'text/cql-identifier'];
+const acceptedCqlExpressionTypes = ['text/cql-expression', 'text/cql', 'text/cql.identifier', 'text/cql-identifier'];
 
 export async function applyAndMerge(planDefinition, patientReference=null, resolver=null, aux={}) { 
   let [CarePlan,RequestGroup,...otherResources] = await applyPlan(planDefinition, patientReference, resolver, aux);
@@ -494,7 +494,7 @@ export async function processActions(actions, patientReference, resolver, aux, e
   ----------------------------------------------------------------------------*/
   targetResource = {
     ...targetResource,
-    meta: { profile: [activityDefinition?.profile] },
+    meta: activityDefinition?.profile ? { profile: [activityDefinition?.profile] } : undefined,
     basedOn: { reference: activityDefinition?.url },
   };
   
