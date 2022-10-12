@@ -447,11 +447,12 @@ export async function processActions(actions, patientReference, resolver, aux, e
     1. Create the target resource of the type specified by the kind element and focused on the Patient in context
   ----------------------------------------------------------------------------*/
   let targetResource = {
-    id: getId(),
-    subject: {
-      reference: 'Patient/' + Patient.id,
-      display: parseName(Patient?.name)
-    }
+    id: getId()
+  };
+
+  let patientFhirReference = {
+    reference: 'Patient/' + Patient.id,
+    display: parseName(Patient?.name)
   };
   
   // https://www.hl7.org/fhir/valueset-request-resource-types.html
@@ -491,65 +492,122 @@ export async function processActions(actions, patientReference, resolver, aux, e
   /*----------------------------------------------------------------------------
     3. Apply the structural elements of the ActivityDefinition to the target resource such as code, timing, doNotPerform, product, quantity, dosage, and so on
   ----------------------------------------------------------------------------*/
-  targetResource = pruneNull({
+  targetResource = {
     ...targetResource,
     meta: { profile: [activityDefinition?.profile] },
     basedOn: { reference: activityDefinition?.url },
-    code: activityDefinition?.code,
-    timing: activityDefinition?.timing,
-    doNotPerform: activityDefinition?.doNotPerform,
-    // TODO: Copy over other structural elements as it makes sense
-  });
+  };
   
+  // Mappings copied from the CQF-Ruler
+  // https://github.com/DBCG/cqf-ruler/blob/v0.6.0/plugin/cr/src/main/java/org/opencds/cqf/ruler/cr/r4/provider/ActivityDefinitionApplyProvider.java
   switch (activityDefinition?.kind) {
+    case "ServiceRequest":
+      targetResource = {
+        ...targetResource,
+        subject: patientFhirReference,
+        intent: activityDefinition?.intent,
+        code: activityDefinition?.code,
+        bodySite: activityDefinition?.bodySite,
+      };
+      break;
     case "MedicationRequest":
-      targetResource = pruneNull({
+      targetResource = {
         ...targetResource,
-        intent: activityDefinition.intent,
-        priority: activityDefinition.priority,
-        medicationCodeableConcept: activityDefinition.productCodeableConcept,
-        instantiatesCanonical: activityDefinition.url ? [activityDefinition.url] : undefined,
-        dosageInstruction: activityDefinition.dosage,
-        // TODO: Copy over other structural elements as it makes sense
-      });
+        subject: patientFhirReference,
+        intent: activityDefinition?.intent,
+        priority: activityDefinition?.priority,
+        dosageInstruction: activityDefinition?.dosage,
+      };
+      if (activityDefinition?.productCodeableConcept) {
+        targetResource.medicationCodeableConcept = activityDefinition?.productCodeableConcept;
+      }
+      else if (activityDefinition?.productReference) {
+        targetResource.medicationReference = activityDefinition?.productReference;
+      }
       break;
-    case "ServiceRequest": // https://hl7.org/fhir/uv/cpg/STU1/StructureDefinition-cpg-servicerequest-mappings.html
-      targetResource = pruneNull({
+    case "SupplyRequest":
+      targetResource = {
         ...targetResource,
-        identifier: activityDefinition.identifier,
-        instantiatesCanonical: activityDefinition.instantiatesCanonical,
-        instantiatesUri: activityDefinition.instantiatesUri,
-        basedOn: activityDefinition.basedOn,
-        replaces: activityDefinition.replaces,
-        requisition: activityDefinition.groupIdentifier,
-        status: activityDefinition.status,
-        intent: activityDefinition.intent,
-        priority: activityDefinition.priority,
-        doNotPerform: activityDefinition.doNotPerform,
-        code: activityDefinition.code,
-        subject: activityDefinition.subject,
-        encounter: activityDefinition.encounter,
-        occurrenceDateTime: activityDefinition.occurrenceDateTime,
-        occurrencePeriod: activityDefinition.occurrencePeriod,
-        occurrenceTiming: activityDefinition.occurrenceTiming,
-        authoredOn: activityDefinition.authoredOn,
-        requester: activityDefinition.requester,
-        performerType: activityDefinition.performerType,
-        performer: activityDefinition.performer,
-        reasonCode: activityDefinition.reasonCode,
-        reasonReference: activityDefinition.reasonReference,
-        insurance: activityDefinition.insurance,
-        supportingInfo: activityDefinition.supportingInfo,
-        note: activityDefinition.note,
-        relevantHistory: activityDefinition.relevantHistory,
-      });
+        quantity: activityDefinition?.quantity,
+        itemCodeableConcept: activityDefinition?.code,
+      };
       break;
+    case "CommunicationRequest": {
+      targetResource = {
+        ...targetResource,
+        subject: patientFhirReference,
+      };
+
+      // Gather payloads
+      // https://github.com/DBCG/cqf-ruler/blob/v0.6.0/plugin/cr/src/main/java/org/opencds/cqf/ruler/cr/r4/provider/ActivityDefinitionApplyProvider.java#L386
+      // Note: The CQF-Ruler does not create multiple payloads
+      const payloads = [];
+      if (activityDefinition?.code?.text) {
+        payloads.push({ contentString: activityDefinition.code.text });
+      }
+      if (activityDefinition?.relatedArtifact) {
+        for (const relatedArtifact of activityDefinition.relatedArtifact) {
+          if (relatedArtifact.url !== undefined) {
+            payloads.push({ contentAttachment: { url: relatedArtifact.url, title: relatedArtifact.display }});
+          }
+        }
+      }
+      if (payloads.length > 0) {
+        targetResource.payload = payloads;
+      }
+
+      break;
+    }
+    case "Task": {
+      targetResource = {
+        ...targetResource,
+        intent: activityDefinition?.intent,
+        for: patientFhirReference,
+        code: activityDefinition?.code,
+      };
+      if (activityDefinition?.code) {
+        // https://github.com/DBCG/cqf-ruler/blob/v0.6.0/plugin/cr/src/main/java/org/opencds/cqf/ruler/cr/r4/provider/ActivityDefinitionApplyProvider.java#L422
+        // Note: The CQF-Ruler does not create multiple inputs
+        const inputs = [];
+        const baseInput = { type: activityDefinition.code };
+        
+        // Extension defined by CPG-on-FHIR for Questionnaire canonical URI
+        const collectWith = activityDefinition?.extension?.find(ext => 
+          ext.url === 'http://hl7.org/fhir/uv/cpg/StructureDefinition/cpg-collectWith');
+        if (collectWith !== undefined) {
+          inputs.push({
+            ...baseInput,
+            valueCanonical: collectWith.valueCanonical,
+          });
+        }
+        
+        if (activityDefinition?.relatedArtifact) {
+          for (const relatedArtifact of activityDefinition.relatedArtifact) {
+            if (relatedArtifact.url !== undefined) {
+              inputs.push({
+                ...baseInput,
+                valueAttachment: { url: relatedArtifact.url, title: relatedArtifact.display },
+              });
+            }
+          }
+        }
+        
+        targetResource.input = inputs;
+      }
+      break;
+    }
     default:
-      targetResource = pruneNull({
+      targetResource = {
         ...targetResource,
-      });
+        subject: patientFhirReference,
+        code: activityDefinition?.code,
+        timing: activityDefinition?.timing,
+        doNotPerform: activityDefinition?.doNotPerform,
+      };
       break;
   }
+
+  targetResource = pruneNull(targetResource);
 
   /*----------------------------------------------------------------------------
     4. Resolve the participant element based on the user in context
@@ -582,7 +640,7 @@ export async function processActions(actions, patientReference, resolver, aux, e
     let cqlWorker = WorkerFactory();
     try {
       let [setupExecution, sendPatientBundle, evaluateExpression] = initialzieCqlWorker(cqlWorker, isNodeJs);
-      if (Array.isArray(activityDefinition.library) || typeof(activityDefinition.library) === 'string') {
+      if (Array.isArray(activityDefinition?.library) || typeof(activityDefinition?.library) === 'string') {
         const libRef = Array.isArray(activityDefinition.library) ? activityDefinition.library[0] : activityDefinition.library;
   
         // Check aux for objects necessary for CQL execution
@@ -621,7 +679,7 @@ export async function processActions(actions, patientReference, resolver, aux, e
       }
 
       // Asynchronously evaluate all dynamicValues
-      const evaluatedValues = await Promise.all(activityDefinition.dynamicValue.map(async (dV) => {
+      const evaluatedValues = await Promise.all(activityDefinition?.dynamicValue.map(async (dV) => {
         if (!acceptedCqlExpressionTypes.includes(dV?.expression?.language ?? "")) {
           throw new Error('Dynamic value specifies an unsupported expression language');
         }
