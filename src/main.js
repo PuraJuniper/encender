@@ -495,7 +495,7 @@ export async function processActions(actions, patientReference, resolver, aux, e
   targetResource = {
     ...targetResource,
     meta: activityDefinition?.profile ? { profile: [activityDefinition?.profile] } : undefined,
-    basedOn: { reference: activityDefinition?.url },
+    basedOn: [{ reference: activityDefinition?.url }],
   };
   
   // Mappings copied from the CQF-Ruler
