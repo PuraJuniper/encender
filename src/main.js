@@ -104,19 +104,17 @@ export async function applyPlan(planDefinition, patientReference=null, resolver=
   let processedActions = []; // Array to hold processed actions
   let otherResources = []; // Any resources created as part of action processing
 
-  // Setup the CQL Worker and process the actions
-  let isNodeJs = aux?.isNodeJs ?? false;
-  const WorkerFactory = aux?.WorkerFactory ?? ( 
-    () => {
-      isNodeJs = true;
-      const require = createRequire(import.meta.url);
-      return new NodeWorker(require.resolve('cql-worker/src/cql-worker-thread.js'));
-    }
-  );
-  let cqlWorker = WorkerFactory();
+  let cqlWorker;
   try {
+    // Setup the CQL Worker and process the actions
+    const {
+      cqlWorker: _cqlWorker,
+      setupExecution, sendPatientBundle, 
+      evaluateExpression: _evaluateExpression
+    } = createAndInitializeCqlWorker(aux);
+    cqlWorker = _cqlWorker; // cqlWorker from outer scope will be used in `finally` clause below
 
-    let [setupExecution, sendPatientBundle, _evaluateExpression] = initialzieCqlWorker(cqlWorker, isNodeJs);
+    // Wrap evaluateExpression to print expression results to console
     let evaluateExpression = async (expression, ...args) => {
       const value = await _evaluateExpression(expression, ...args);
       addToLog(expression, value);
@@ -127,39 +125,8 @@ export async function applyPlan(planDefinition, patientReference=null, resolver=
     // referenced by this PlanDefinition.
     if (Array.isArray(planDefinition.library) || typeof(planDefinition.library) === 'string') {
       const libRef = Array.isArray(planDefinition.library) ? planDefinition.library[0] : planDefinition.library;
-
-      // Check aux for objects necessary for CQL execution
-      let elmJsonDependencies = aux.elmJsonDependencies ?? [];
-      const valueSetJson = aux.valueSetJson ?? {};
-      const cqlParameters = aux.cqlParameters ?? {};
-
-      const elmJsonKey = Object.keys(elmJsonDependencies).filter(e => libRef.includes(e))[0];
-      let elmJson = elmJsonDependencies[elmJsonKey];
-
-      if (!elmJson) {
-        const resolvedLibraries = await resolver(libRef);
-        if (Array.isArray(resolvedLibraries) && resolvedLibraries.length > 0) {
-          const library = resolvedLibraries[0]; // TODO: What to do if multiple libraries are found?
-          // Find an ELM JSON Attachment
-          // NOTE: The cql-worker library can only execute ELM JSON
-          elmJson = getElmJsonFromLibrary(library, isNodeJs);
-          if (!elmJson) {
-            throw new Error('No Attachments with contentType "application/elm+json" found in referenced Library: ' + libRef);
-          }
-        } else {
-          throw new Error('Cannot resolve referenced Library: ' + libRef);
-        }
-      }
-      
-      setupExecution(elmJson, valueSetJson, cqlParameters, elmJsonDependencies);
-      // Define patient bundle
-      var patientBundle = {
-        resourceType: 'Bundle',
-        id: 'survey-bundle',
-        type: 'collection',
-        entry: ( await resolver() ).map(r => {return {resource: r}})
-      };
-      sendPatientBundle(patientBundle);
+      await runSetupExecutionForLibrary(libRef, resolver, aux, setupExecution);
+      await runSendPatientBundle(resolver, sendPatientBundle);
     }
 
     // If there are actions defined in this PlanDefinition, process them asynchronously
@@ -285,7 +252,22 @@ export async function processActions(actions, patientReference, resolver, aux, e
             if (!acceptedCqlExpressionTypes.includes(dV?.expression?.language ?? "")) {
               throw new Error('Dynamic value specifies an unsupported expression language');
             }
-            const value = await evaluateExpression(dV.expression.expression);
+            let value;
+            if (dV?.expression?.reference !== undefined) {
+              const {
+                cqlWorker: curCqlWorker,
+                setupExecution: curSetupExecution,
+                sendPatientBundle: curSendPatientBundle,
+                evaluateExpression: curEvaluateExpression
+              } = createAndInitializeCqlWorker(aux);
+              await runSetupExecutionForLibrary(dV.expression.reference, resolver, aux, curSetupExecution);
+              await runSendPatientBundle(resolver, curSendPatientBundle);
+              value = await curEvaluateExpression(dV.expression.expression);
+              curCqlWorker.terminate();
+            }
+            else {
+              value = await evaluateExpression(dV.expression.expression);
+            }
             return {
               path: dV.path,
               evaluated: value
@@ -294,11 +276,13 @@ export async function processActions(actions, patientReference, resolver, aux, e
           }));
         }
 
-        if (/PlanDefinition/.test(def)) {
-          // If this is a PlanDefinition, resolve it so we can apply it
-          const planDefinition = ( await resolver(def) )[0];
+        const resolvedDef = ( await resolver(def) )[0];
+        if (resolvedDef === undefined) {
+          // No need to do anything
+        }
+        else if (resolvedDef.resourceType === "PlanDefinition") {
           // NOTE: Recursive function call
-          let [_, RequestGroup, ...moreResources] = await applyPlan(planDefinition, patientReference, resolver, aux);
+          let [_, RequestGroup, ...moreResources] = await applyPlan(resolvedDef, patientReference, resolver, aux);
 
           // Link the generated RequestGroup's id via the resource element
           applied.resource = {
@@ -312,7 +296,7 @@ export async function processActions(actions, patientReference, resolver, aux, e
           // NOTE: Action takes precedence over PlanDefinition
           applied = pruneNull({
             ...applied,
-            title: act?.title ?? planDefinition?.title,
+            title: act?.title ?? resolvedDef?.title,
             description: act?.description,
             textEquivalent: act?.textEquivalent
           });
@@ -330,10 +314,8 @@ export async function processActions(actions, patientReference, resolver, aux, e
           otherResources.push(RequestGroup);
           moreResources.forEach(mr => otherResources.push(mr));
 
-        } else if (/ActivityDefinition/.test(def)) {
-          // If this is an ActivityDefinition, resolve it so we can apply it
-          const activityDefinition = ( await resolver(def) )[0];
-          let targetResource = await applyActivity(activityDefinition, patientReference, resolver, aux);
+        } else if (resolvedDef.resourceType === "ActivityDefinition") {
+          let targetResource = await applyActivity(resolvedDef, patientReference, resolver, aux);
 
           // Link the generated CarePlan's id via the resource element
           applied.resource = {
@@ -347,7 +329,7 @@ export async function processActions(actions, patientReference, resolver, aux, e
           // NOTE: [PlanDefinition takes precedence over ActivityDefinition](https://www.hl7.org/fhir/plandefinition.html#12.18.3.4)
           applied = pruneNull({
             ...applied,
-            title: act?.title ?? activityDefinition?.title,
+            title: act?.title ?? resolvedDef?.title,
             description: act?.description,
             textEquivalent: act?.textEquivalent
           });
@@ -364,28 +346,25 @@ export async function processActions(actions, patientReference, resolver, aux, e
           // Bubble up the resources which were generated by this apply operation
           otherResources.push(targetResource);
 
-        } else if (/Questionnaire/.test(def)) {
-          // If this is an Questionnaire, resolve it so we can apply it
-          const questionnaire = ( await resolver(def) )[0];
-
+        } else if (resolvedDef.resourceType === "Questionnaire") {
           // Link the Questionnaire's id via the resource element
           applied.resource = {
-            reference: questionnaire.resourceType + '/' + questionnaire.id
+            reference: resolvedDef.resourceType + '/' + resolvedDef.id
           };
 
           // Apply any overrides based on the elements of the action such as title, description, and dynamicValue.
           // NOTE: [PlanDefinition takes precedence over ActivityDefinition](https://www.hl7.org/fhir/plandefinition.html#12.18.3.4)
           applied = pruneNull({
             ...applied,
-            title: act?.title ?? questionnaire?.title,
-            description: act?.description ?? questionnaire?.description,
+            title: act?.title ?? resolvedDef?.title,
+            description: act?.description ?? resolvedDef?.description,
             textEquivalent: act?.textEquivalent
           });
 
           // TODO: Consider what dynamicValue support would look like for a Questionnaire
 
           // Bubble up the resources which were generated by this apply operation
-          otherResources.push(questionnaire);
+          otherResources.push(resolvedDef);
 
         }
 
@@ -495,7 +474,7 @@ export async function processActions(actions, patientReference, resolver, aux, e
   targetResource = {
     ...targetResource,
     meta: activityDefinition?.profile ? { profile: [activityDefinition?.profile] } : undefined,
-    basedOn: { reference: activityDefinition?.url },
+    basedOn: [{ reference: activityDefinition?.url }],
   };
   
   // Mappings copied from the CQF-Ruler
@@ -628,54 +607,21 @@ export async function processActions(actions, patientReference, resolver, aux, e
     7. Apply any dynamicValue elements
   ----------------------------------------------------------------------------*/
   if (activityDefinition?.dynamicValue) {
-    // Define a new worker thread to evaluate these dynamicValue expressions
-    let isNodeJs = aux?.isNodeJs ?? false;
-    const WorkerFactory = aux?.WorkerFactory ?? ( 
-      () => {
-        isNodeJs = true;
-        const require = createRequire(import.meta.url);
-        return new NodeWorker(require.resolve('cql-worker/src/cql-worker-thread.js'));
-      }
-    );
-    let cqlWorker = WorkerFactory();
+    let cqlWorker;
     try {
-      let [setupExecution, sendPatientBundle, evaluateExpression] = initialzieCqlWorker(cqlWorker, isNodeJs);
+      // Define a new worker thread to evaluate these dynamicValue expressions
+      const {
+        cqlWorker: _cqlWorker,
+        setupExecution, sendPatientBundle, evaluateExpression
+      } = createAndInitializeCqlWorker(aux);
+      cqlWorker = _cqlWorker; // cqlWorker from outer scope will be used in `finally` clause below
+
+      let setupExecutionComplete = false;
       if (Array.isArray(activityDefinition?.library) || typeof(activityDefinition?.library) === 'string') {
         const libRef = Array.isArray(activityDefinition.library) ? activityDefinition.library[0] : activityDefinition.library;
-  
-        // Check aux for objects necessary for CQL execution
-        let elmJsonDependencies = aux.elmJsonDependencies ?? [];
-        const valueSetJson = aux.valueSetJson ?? {};
-        const cqlParameters = aux.cqlParameters ?? {};
-  
-        const elmJsonKey = Object.keys(elmJsonDependencies).filter(e => libRef.includes(e))[0];
-        let elmJson = elmJsonDependencies[elmJsonKey];
-  
-        if (!elmJson) {
-          const resolvedLibraries = await resolver(libRef);
-          if (Array.isArray(resolvedLibraries) && resolvedLibraries.length > 0) {
-            const library = resolvedLibraries[0]; // TODO: What to do if multiple libraries are found?
-            // Find an ELM JSON Attachment
-            // NOTE: The cql-worker library can only execute ELM JSON
-            elmJson = getElmJsonFromLibrary(library, isNodeJs);
-            if (!elmJson) {
-              throw new Error('No Attachments with contentType "application/elm+json" found in referenced Library: ' + libRef);
-            }
-          } else {
-            throw new Error('Cannot resolve referenced Library: ' + libRef);
-          }
-        }
-        setupExecution(elmJson, valueSetJson, cqlParameters, elmJsonDependencies);
-        // Define patient bundle
-        var patientBundle = {
-          resourceType: 'Bundle',
-          id: 'survey-bundle',
-          type: 'collection',
-          entry: ( await resolver() ).map(r => {return {resource: r}})
-        };
-        sendPatientBundle(patientBundle);
-      } else {
-        // TODO: Throw error because we have a dynamic value but no library defined
+        await runSetupExecutionForLibrary(libRef, resolver, aux, setupExecution);
+        await runSendPatientBundle(resolver, sendPatientBundle);
+        setupExecutionComplete = true;
       }
 
       // Asynchronously evaluate all dynamicValues
@@ -683,7 +629,27 @@ export async function processActions(actions, patientReference, resolver, aux, e
         if (!acceptedCqlExpressionTypes.includes(dV?.expression?.language ?? "")) {
           throw new Error('Dynamic value specifies an unsupported expression language');
         }
-        const value = await evaluateExpression(dV.expression.expression);
+        let value;
+        if (dV?.expression?.reference !== undefined) {
+          const {
+            cqlWorker: curCqlWorker,
+            setupExecution: curSetupExecution,
+            sendPatientBundle: curSendPatientBundle,
+            evaluateExpression: curEvaluateExpression,
+          } = createAndInitializeCqlWorker(aux);
+          await runSetupExecutionForLibrary(dV.expression.reference, resolver, aux, curSetupExecution);
+          await runSendPatientBundle(resolver, curSendPatientBundle);
+          value = await curEvaluateExpression(dV.expression.expression);
+          curCqlWorker.terminate();
+        }
+        else {
+          if (setupExecutionComplete) {
+            value = await evaluateExpression(dV.expression.expression);
+          }
+          else {
+            throw new Error('Missing library for dynamicValue expression');
+          }
+        }
         return {
           path: dV.path,
           evaluated: value
@@ -704,4 +670,60 @@ export async function processActions(actions, patientReference, resolver, aux, e
 
   return targetResource;
 
+}
+
+async function runSetupExecutionForLibrary(libRef, resolver, aux, setupExecution) {
+  // Check aux for objects necessary for CQL execution
+  let isNodeJs = aux?.isNodeJs ?? false;
+  let elmJsonDependencies = aux.elmJsonDependencies ?? [];
+  const valueSetJson = aux.valueSetJson ?? {};
+  const cqlParameters = aux.cqlParameters ?? {};
+
+  const elmJsonKey = Object.keys(elmJsonDependencies).filter(e => libRef.includes(e))[0];
+  let elmJson = elmJsonDependencies[elmJsonKey];
+
+  if (!elmJson) {
+    const resolvedLibraries = await resolver(libRef);
+    if (Array.isArray(resolvedLibraries) && resolvedLibraries.length > 0) {
+      const library = resolvedLibraries[0]; // TODO: What to do if multiple libraries are found?
+      // Find an ELM JSON Attachment
+      // NOTE: The cql-worker library can only execute ELM JSON
+      elmJson = getElmJsonFromLibrary(library, isNodeJs);
+      if (!elmJson) {
+        throw new Error('No Attachments with contentType "application/elm+json" found in referenced Library: ' + libRef);
+      }
+    } else {
+      throw new Error('Cannot resolve referenced Library: ' + libRef);
+    }
+  }
+  setupExecution(elmJson, valueSetJson, cqlParameters, elmJsonDependencies);
+}
+
+async function runSendPatientBundle(resolver, sendPatientBundle) {
+  var patientBundle = {
+    resourceType: 'Bundle',
+    id: 'survey-bundle',
+    type: 'collection',
+    entry: ( await resolver() ).map(r => {return {resource: r}})
+  };
+  sendPatientBundle(patientBundle);
+}
+
+function createAndInitializeCqlWorker(aux) {
+  let isNodeJs = aux?.isNodeJs ?? false;
+  const WorkerFactory = aux?.WorkerFactory ?? ( 
+    () => {
+      isNodeJs = true;
+      const require = createRequire(import.meta.url);
+      return new NodeWorker(require.resolve('cql-worker/src/cql-worker-thread.js'));
+    }
+  );
+  const cqlWorker = WorkerFactory();
+  const [setupExecution, sendPatientBundle, evaluateExpression] = initialzieCqlWorker(cqlWorker, isNodeJs);
+  return {
+    cqlWorker,
+    setupExecution,
+    sendPatientBundle,
+    evaluateExpression
+  }
 }
